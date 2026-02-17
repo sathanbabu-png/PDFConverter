@@ -1,65 +1,54 @@
 
-import { GoogleGenAI, Type } from "@google/genai";
 import { OutputFormat } from "../types";
 
-export async function analyzeDocument(images: string[], format: OutputFormat) {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+/**
+ * Replaces the Gemini-based analysis with a local PDF.js text extraction logic.
+ * This runs entirely in the browser without an API key.
+ */
+export async function analyzeDocument(file: File, format: OutputFormat) {
+  // @ts-ignore
+  const pdfjsLib = window.pdfjsLib;
+  const arrayBuffer = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
   
-  const model = 'gemini-3-flash-preview';
-  
-  const prompt = format === OutputFormat.WORD 
-    ? `Analyze the provided PDF pages. Reconstruct the document content in structured Markdown. 
-       Preserve headings, paragraphs, lists, and bold text. If there are tables, represent them as Markdown tables.
-       Return the output in a JSON format with a "content" field containing the Markdown text and a "title" field.`
-    : `Analyze the provided PDF pages. Extract all tabular data. If there are multiple tables, consolidate them into a single logical dataset or return the most significant table.
-       Return the output as a JSON object with a "tables" field (which is a 2D array of values) and a "title" field.`;
-
-  const imageParts = images.map(img => ({
-    inlineData: {
-      data: img.split(',')[1],
-      mimeType: 'image/jpeg'
+  if (format === OutputFormat.WORD) {
+    let fullText = "";
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i);
+      const textContent = await page.getTextContent();
+      // Simple layout reconstruction by joining items
+      const pageText = textContent.items
+        .map((item: any) => item.str)
+        .join(" ");
+      fullText += pageText + "\n\n";
     }
-  }));
+    return { content: fullText, title: file.name };
+  } else {
+    // Basic Table Extraction Heuristic for Excel
+    const allRows: string[][] = [];
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i);
+      const textContent = await page.getTextContent();
+      
+      // Group items by their vertical position (Y coordinate)
+      const rowsMap = new Map<number, any[]>();
+      textContent.items.forEach((item: any) => {
+        const y = Math.round(item.transform[5]); // Y coordinate
+        if (!rowsMap.has(y)) rowsMap.set(y, []);
+        rowsMap.get(y)?.push(item);
+      });
 
-  const response = await ai.models.generateContent({
-    model,
-    contents: {
-      parts: [
-        ...imageParts,
-        { text: prompt }
-      ]
-    },
-    config: {
-      responseMimeType: "application/json",
-      responseSchema: format === OutputFormat.WORD ? {
-        type: Type.OBJECT,
-        properties: {
-          content: { type: Type.STRING },
-          title: { type: Type.STRING }
-        },
-        required: ["content"]
-      } : {
-        type: Type.OBJECT,
-        properties: {
-          tables: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.ARRAY,
-              items: { type: Type.STRING }
-            }
-          },
-          title: { type: Type.STRING }
-        },
-        required: ["tables"]
-      }
+      // Sort Y coordinates descending (top to bottom)
+      const sortedY = Array.from(rowsMap.keys()).sort((a, b) => b - a);
+      
+      sortedY.forEach(y => {
+        const rowItems = rowsMap.get(y) || [];
+        // Sort items in row by X coordinate
+        rowItems.sort((a: any, b: any) => a.transform[4] - b.transform[4]);
+        allRows.push(rowItems.map((item: any) => item.str));
+      });
+      allRows.push([]); // Page break gap
     }
-  });
-
-  const text = response.text;
-  try {
-    return JSON.parse(text);
-  } catch (e) {
-    console.error("Failed to parse Gemini response", text);
-    throw new Error("Invalid response from AI");
+    return { tables: allRows, title: file.name };
   }
 }

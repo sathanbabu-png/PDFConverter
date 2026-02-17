@@ -1,83 +1,52 @@
 
 import streamlit as st
-import google.generativeai as genai
-import fitz  # PyMuPDF
+import pdfplumber
 import io
-import json
-import os
 import pandas as pd
 from docx import Document
 from PIL import Image
 
 # Configuration
-st.set_page_config(page_title="SmartPDF Converter", page_icon="📄", layout="centered")
+st.set_page_config(page_title="SmartPDF Local", page_icon="📄", layout="centered")
 
 # CSS for styling
 st.markdown("""
     <style>
     .main { background-color: #f8fafc; }
-    .stButton>button { width: 100%; border-radius: 12px; height: 3em; font-weight: bold; }
+    .stButton>button { width: 100%; border-radius: 12px; height: 3em; font-weight: bold; background-color: #4f46e5; color: white; }
     .stDownloadButton>button { width: 100%; border-radius: 12px; background-color: #059669; color: white; }
     </style>
     """, unsafe_allow_html=True)
 
-def pdf_to_images(pdf_file):
-    """Converts first 5 pages of PDF to images."""
-    doc = fitz.open(stream=pdf_file.read(), filetype="pdf")
-    images = []
-    # Limit to 5 pages for performance and token management
-    for i in range(min(len(doc), 5)):
-        page = doc.load_page(i)
-        pix = page.get_pixmap(matrix=fitz.Matrix(1.5, 1.5))
-        img_data = pix.tobytes("jpeg")
-        img = Image.open(io.BytesIO(img_data))
-        images.append(img)
-    doc.close()
-    return images
-
-def analyze_document(images, output_format):
-    """Sends images to Gemini for analysis."""
-    api_key = os.environ.get("API_KEY")
-    if not api_key:
-        st.error("API_KEY not found in environment variables.")
-        return None
-
-    genai.configure(api_key=api_key)
-    # Using gemini-3-flash-preview as per project guidelines for basic text/structure tasks
-    model = genai.GenerativeModel('gemini-3-flash-preview') 
-
-    if output_format == "Word":
-        prompt = "Analyze the provided PDF pages. Reconstruct the document content in structured Markdown. Preserve headings, lists, and bold text. Return a JSON object with a 'content' field."
-    else:
-        prompt = "Analyze the provided PDF pages. Extract all tabular data. Return a JSON object with a 'tables' field (a 2D array of strings)."
-
-    # Convert PIL images to bytes for the API
-    parts = []
-    for img in images:
-        buf = io.BytesIO()
-        img.save(buf, format='JPEG')
-        parts.append({"mime_type": "image/jpeg", "data": buf.getvalue()})
-    
-    parts.append(prompt)
-    
-    response = model.generate_content(
-        parts,
-        generation_config={"response_mime_type": "application/json"}
-    )
-    
-    return json.loads(response.text)
+def extract_content_locally(pdf_file, output_format):
+    """Extracts text or tables using pdfplumber locally."""
+    with pdfplumber.open(pdf_file) as pdf:
+        if output_format == "Word":
+            full_text = []
+            for page in pdf.pages:
+                text = page.extract_text()
+                if text:
+                    full_text.append(text)
+            return "\n\n".join(full_text)
+        else:
+            # Table extraction
+            all_tables = []
+            for page in pdf.pages:
+                tables = page.extract_tables()
+                for table in tables:
+                    # Filter out empty tables
+                    if any(any(cell for cell in row if cell) for row in table):
+                        all_tables.extend(table)
+                        all_tables.append([]) # Gap between tables
+            return all_tables
 
 def create_docx(content):
-    """Generates a .docx file from markdown content."""
+    """Generates a .docx file from text content."""
     doc = Document()
-    lines = content.split('\n')
-    for line in lines:
-        if line.startswith('# '):
-            doc.add_heading(line.replace('# ', ''), level=1)
-        elif line.startswith('## '):
-            doc.add_heading(line.replace('## ', ''), level=2)
-        else:
-            doc.add_paragraph(line)
+    doc.add_heading('Extracted Content', 0)
+    for paragraph in content.split('\n\n'):
+        if paragraph.strip():
+            doc.add_paragraph(paragraph)
     
     target = io.BytesIO()
     doc.save(target)
@@ -85,7 +54,12 @@ def create_docx(content):
 
 def create_excel(tables):
     """Generates an .xlsx file from 2D list."""
-    df = pd.DataFrame(tables)
+    if not tables:
+        # Create empty df if no tables found
+        df = pd.DataFrame([["No tables detected in PDF"]])
+    else:
+        df = pd.DataFrame(tables)
+        
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         df.to_excel(writer, index=False, header=False)
@@ -93,7 +67,8 @@ def create_excel(tables):
 
 def main():
     st.title("📄 SmartPDF Converter")
-    st.subheader("AI-Powered PDF to Word & Excel")
+    st.subheader("Fast Local PDF to Word & Excel")
+    st.info("🔒 Private: All processing happens locally on this server. No data is sent to external APIs.")
     
     uploaded_file = st.file_uploader("Choose a PDF file", type="pdf")
     
@@ -104,20 +79,17 @@ def main():
         
         if st.button("🚀 Convert Now"):
             try:
-                with st.status("Processing document...", expanded=True) as status:
-                    st.write("Extracting pages...")
-                    images = pdf_to_images(uploaded_file)
-                    
-                    st.write("AI Analysis (this may take a moment)...")
-                    result = analyze_document(images, output_format)
+                with st.status("Processing document locally...", expanded=True) as status:
+                    st.write("Reading PDF structure...")
+                    result = extract_content_locally(uploaded_file, output_format)
                     
                     st.write("Generating file...")
                     if output_format == "Word":
-                        file_bytes = create_docx(result.get('content', ''))
+                        file_bytes = create_docx(result)
                         ext = "docx"
                         mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                     else:
-                        file_bytes = create_excel(result.get('tables', []))
+                        file_bytes = create_excel(result)
                         ext = "xlsx"
                         mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                     
@@ -134,7 +106,7 @@ def main():
                 st.error(f"An error occurred: {str(e)}")
 
     st.divider()
-    st.caption("Note: For this demo, conversion is limited to the first 5 pages. Powered by Gemini AI.")
+    st.caption("Secure Local Engine. No internet connection required for processing.")
 
 if __name__ == "__main__":
     main()

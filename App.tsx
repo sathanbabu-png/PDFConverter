@@ -1,8 +1,7 @@
 
-import React, { useState, useCallback, useRef } from 'react';
-import { FileUp, FileText, Table as TableIcon, CheckCircle, AlertCircle, Loader2, Download, Trash2 } from 'lucide-react';
+import React, { useState, useRef } from 'react';
+import { FileUp, FileText, Table as TableIcon, CheckCircle, AlertCircle, Loader2, Download, Trash2, ShieldCheck } from 'lucide-react';
 import { OutputFormat, ProcessingStep, FileInfo } from './types';
-import { pdfToImages } from './services/pdfProcessor';
 import { analyzeDocument } from './services/geminiService';
 import { exportFile } from './services/fileExporter';
 
@@ -11,8 +10,7 @@ const App: React.FC = () => {
   const [format, setFormat] = useState<OutputFormat>(OutputFormat.WORD);
   const [isProcessing, setIsProcessing] = useState(false);
   const [steps, setSteps] = useState<ProcessingStep[]>([
-    { id: 'extract', label: 'Extracting PDF content', status: 'pending' },
-    { id: 'analyze', label: 'AI document analysis', status: 'pending' },
+    { id: 'analyze', label: 'Local data extraction', status: 'pending' },
     { id: 'generate', label: 'Generating download file', status: 'pending' }
   ]);
   const [error, setError] = useState<string | null>(null);
@@ -50,25 +48,19 @@ const App: React.FC = () => {
     resetSteps();
 
     try {
-      // Step 1: Extract images from PDF
-      updateStep('extract', 'loading');
-      const images = await pdfToImages(fileInfo.file);
-      updateStep('extract', 'completed');
-
-      // Step 2: Gemini Analysis
+      // Step 1: Local Analysis (Text Extraction)
       updateStep('analyze', 'loading');
-      const result = await analyzeDocument(images, format);
+      const result = await analyzeDocument(fileInfo.file, format);
       updateStep('analyze', 'completed');
 
-      // Step 3: Export
+      // Step 2: Export
       updateStep('generate', 'loading');
       await exportFile(result, format, fileInfo.name);
       updateStep('generate', 'completed');
 
     } catch (err: any) {
       console.error(err);
-      setError(err.message || 'An unexpected error occurred during conversion.');
-      // Mark active loading step as error
+      setError(err.message || 'An unexpected error occurred during local conversion.');
       setSteps(prev => prev.map(s => s.status === 'loading' ? { ...s, status: 'error' } : s));
     } finally {
       setIsProcessing(false);
@@ -87,11 +79,15 @@ const App: React.FC = () => {
         {/* Header */}
         <div className="text-center mb-10">
           <h1 className="text-4xl font-extrabold text-slate-900 tracking-tight mb-3">
-            SmartPDF <span className="text-indigo-600">Converter</span>
+            SmartPDF <span className="text-indigo-600">Local</span>
           </h1>
           <p className="text-lg text-slate-600 max-w-xl mx-auto">
-            Intelligently convert your PDF documents into editable Word or structured Excel files using advanced AI.
+            Convert PDFs privately and securely. All processing happens right here in your browser.
           </p>
+          <div className="flex items-center justify-center space-x-2 mt-4 text-emerald-600 font-medium">
+            <ShieldCheck className="w-5 h-5" />
+            <span>Privacy First: No API Connection Required</span>
+          </div>
         </div>
 
         {/* Main Card */}
@@ -106,7 +102,7 @@ const App: React.FC = () => {
                   <FileUp className="w-8 h-8 text-indigo-600" />
                 </div>
                 <h3 className="text-lg font-semibold text-slate-900 mb-1">Click or drag to upload PDF</h3>
-                <p className="text-sm text-slate-500">Supports PDF files up to 20MB</p>
+                <p className="text-sm text-slate-500">Fast local processing</p>
                 <input 
                   type="file" 
                   ref={fileInputRef}
@@ -150,7 +146,7 @@ const App: React.FC = () => {
                   >
                     <FileText className={`w-8 h-8 mb-2 ${format === OutputFormat.WORD ? 'text-indigo-600' : 'text-slate-400'}`} />
                     <span className={`font-semibold ${format === OutputFormat.WORD ? 'text-indigo-900' : 'text-slate-600'}`}>To Word</span>
-                    <span className="text-xs text-slate-400 mt-1">Text & Layout</span>
+                    <span className="text-xs text-slate-400 mt-1">Local Text Extractor</span>
                   </button>
                   <button
                     disabled={isProcessing}
@@ -163,7 +159,7 @@ const App: React.FC = () => {
                   >
                     <TableIcon className={`w-8 h-8 mb-2 ${format === OutputFormat.EXCEL ? 'text-emerald-600' : 'text-slate-400'}`} />
                     <span className={`font-semibold ${format === OutputFormat.EXCEL ? 'text-emerald-900' : 'text-slate-600'}`}>To Excel</span>
-                    <span className="text-xs text-slate-400 mt-1">Tables & Data</span>
+                    <span className="text-xs text-slate-400 mt-1">Local Data Parser</span>
                   </button>
                 </div>
 
@@ -176,12 +172,12 @@ const App: React.FC = () => {
                   {isProcessing ? (
                     <>
                       <Loader2 className="w-5 h-5 animate-spin" />
-                      <span>Converting...</span>
+                      <span>Processing...</span>
                     </>
                   ) : (
                     <>
                       <Download className="w-5 h-5" />
-                      <span>Convert and Download</span>
+                      <span>Convert Locally</span>
                     </>
                   )}
                 </button>
@@ -226,8 +222,7 @@ const App: React.FC = () => {
 
         {/* Footer Info */}
         <div className="mt-8 text-center text-slate-400 text-sm">
-          <p>© 2024 SmartPDF Converter. Powered by Gemini AI.</p>
-          <p className="mt-1">For demo purposes, extraction is limited to the first 5 pages.</p>
+          <p>© 2024 SmartPDF Local. Secure, Offline-capable conversion.</p>
         </div>
       </div>
     </div>

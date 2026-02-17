@@ -1,7 +1,7 @@
 
 streamlit
-google-generativeai
 pymupdf
+pdfplumber
 pillow
 python-docx
 pandas
