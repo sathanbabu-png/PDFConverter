@@ -1,0 +1,5 @@
+{
+  "name": "SmartPDF Converter",
+  "description": "An intelligent PDF to Word and Excel converter using Gemini AI to preserve layout and structure.",
+  "requestFramePermissions": []
+}
