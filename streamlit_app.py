@@ -19,7 +19,7 @@ st.markdown("""
     .stButton>button { width: 100%; border-radius: 12px; height: 3em; font-weight: bold; }
     .stDownloadButton>button { width: 100%; border-radius: 12px; background-color: #059669; color: white; }
     </style>
-    """, unsafe_allow_value=True)
+    """, unsafe_allow_html=True)
 
 def pdf_to_images(pdf_file):
     """Converts first 5 pages of PDF to images."""
@@ -43,7 +43,8 @@ def analyze_document(images, output_format):
         return None
 
     genai.configure(api_key=api_key)
-    model = genai.GenerativeModel('gemini-2.0-flash') # Using stable flash for Python SDK
+    # Using gemini-3-flash-preview as per project guidelines for basic text/structure tasks
+    model = genai.GenerativeModel('gemini-3-flash-preview') 
 
     if output_format == "Word":
         prompt = "Analyze the provided PDF pages. Reconstruct the document content in structured Markdown. Preserve headings, lists, and bold text. Return a JSON object with a 'content' field."
